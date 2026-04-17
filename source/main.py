@@ -134,7 +134,8 @@ LOCAL_PATHS = [os.path.join(GITHUBMIRROR_DIR, f"{i+1}.txt") for i in range(len(U
 LOCAL_PATHS.append(os.path.join(GITHUBMIRROR_DIR, "26.txt"))
 
 # -------------------- HTTP-СЕССИЯ --------------------
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Warnings про InsecureRequestWarning НЕ отключаем: TLS-проверка всегда включена,
+# чтобы не открывать окно для MITM-атак на данные, публикуемые из репозитория.
 
 CHROME_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -172,24 +173,17 @@ def fetch_data(
     timeout: int = 10,
     max_attempts: int = 3,
     session: requests.Session | None = None,
-    allow_http_downgrade: bool = True,
+    allow_http_downgrade: bool = False,  # deprecated, больше не используется
 ) -> str:
+    # TLS-проверка включена на всех попытках, понижение HTTPS→HTTP не делаем:
+    # данные из этих URL публикуются в репозиторий и раздаются пользователям VPN,
+    # поэтому целостность/подлинность источника критична для защиты от MITM.
+    del allow_http_downgrade  # параметр сохранён для обратной совместимости вызовов
     sess = session or REQUESTS_SESSION
     last_exc: Exception = RuntimeError("No attempts made")
     for attempt in range(1, max_attempts + 1):
         try:
-            modified_url = url
-            verify = True
-
-            if attempt == 2:
-                verify = False
-            elif attempt == 3:
-                parsed = urllib.parse.urlparse(url)
-                if parsed.scheme == "https" and allow_http_downgrade:
-                    modified_url = parsed._replace(scheme="http").geturl()
-                verify = False
-
-            response = sess.get(modified_url, timeout=timeout, verify=verify)
+            response = sess.get(url, timeout=timeout, verify=True)
             response.raise_for_status()
             return response.text
 
